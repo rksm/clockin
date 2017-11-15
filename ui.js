@@ -4,6 +4,14 @@ import { pt, Color } from "lively.graphics";
 import { VerticalLayout, ProportionalLayout, Morph, HorizontalLayout } from "lively.morphic";
 import { connect } from "lively.bindings";
 
+/*
+
+let listEdMorph = await listSince()
+installInWorld($world);
+
+*/
+
+
 class ClockinList extends Morph {
 
   static get properties() {
@@ -188,6 +196,3 @@ export function installInWorld(world) {
   world.addCommands(commands);
   world.addKeyBindings(keybindings);
 }
-
-// let listEdMorph = await listSince()
-// installInWorld($world);
