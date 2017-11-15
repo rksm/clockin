@@ -10,7 +10,7 @@ function readableDate(time) {
   return date.format(time, "yyyy-mm-dd HH:MM");
 }
 
-function ensureDate(d) {
+export function ensureDate(d) {
   if (typeof d === "number") return new Date(d);
   if (typeof d === "string") d = chrono.parse(d);
   if (d instanceof Date) return d;
