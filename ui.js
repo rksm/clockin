@@ -1,4 +1,4 @@
-import { sessionsBetween, ensureDate, clockout, clockin, clockedInSession } from "./index.js";
+import { sessionsBetween, syncWithCloudIfOlderThan, ensureDate, clockout, clockin, clockedInSession } from "./index.js";
 import { Database } from "lively.storage";
 import { pt, Color } from "lively.graphics";
 import { VerticalLayout, ProportionalLayout, Morph, HorizontalLayout } from "lively.morphic";
@@ -201,10 +201,12 @@ const commands = [
 
   {
     name: "[clockin] list since",
-    exec(world) {
+    exec: async (world) => {
       let db = Database.ensureDB("roberts-timetracking/clockin"),
+          remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin',
           listEd = new ClockinList({db});
       listEd.openInWindow().activate();
+      await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
       return listEd.interactiveUpdate();
     }
   },
@@ -213,7 +215,9 @@ const commands = [
     name: "[clockin] current",
     async exec(world) {
       let db = Database.ensureDB("roberts-timetracking/clockin"),
-          sess = await clockedInSession(db);
+          remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
+      await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
+      let sess = await clockedInSession(db);
       return $world.inform(sess ? sess.report() : "not clocked in");
     }
   },
@@ -222,7 +226,9 @@ const commands = [
     name: "[clockin] clockin",
     async exec(world) {
       let db = Database.ensureDB("roberts-timetracking/clockin"),
-          sess = await clockedInSession(db);
+          remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
+      await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
+      let sess = await clockedInSession(db);
       if (sess) return $world.inform("already clocked in");
       let message = await $world.editPrompt("what do you want to do?", {historyId: "clockedin-start-message"});
       if (!message) return $world.setStatusMessage("canceled");
@@ -236,7 +242,9 @@ const commands = [
     name: "[clockin] clockout",
     async exec(world) {
       let db = Database.ensureDB("roberts-timetracking/clockin"),
-          sess = await clockedInSession(db);
+          remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
+      await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
+      let sess = await clockedInSession(db);
       if (!sess) return $world.inform("not clocked in");
       let message = await $world.editPrompt("what did you do?", {input: sess.start.message, historyId: "clockedin-end-message"});
       if (!message) return $world.setStatusMessage("canceled");

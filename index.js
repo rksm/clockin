@@ -1,6 +1,7 @@
 import chrono from "./deps/chrono-node_1.3.5.js"
 import { Database } from "lively.storage";
 import { date, obj, arr, string } from "lively.lang";
+import { LoadingIndicator } from "lively.components";
 
 // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 // time helpers
@@ -163,4 +164,32 @@ export async function clockout(db, message, time = new Date()) {
   let end = {time: time.getTime(), type: "end", message, clockin: start._id};
   await db.add(end);
   return new Session(start, end);
+}
+
+export async function syncWithCloudIfOlderThan(db, remoteDBUrl, olderThan) {
+  if (typeof sessionStorage !== "undefined") {
+    let lastTime = Number(sessionStorage[`clockin-sync-${remoteDBUrl}`]) || 0;
+    if (lastTime >= ensureDate(olderThan)) return false;
+  }
+  await syncWithCloud(db, remoteDBUrl);
+  sessionStorage[`clockin-sync-${remoteDBUrl}`] = Date.now();
+  return true;
+}
+
+export async function syncWithCloud(db, remoteDBUrl) {
+  let i = LoadingIndicator.open("Syncing...");
+  let syncReport;
+  try {
+    syncReport = await db.sync(remoteDBUrl);
+  } catch (err) {
+    $world.showError(`Syncing to ${remoteDBUrl} failed!\n${err.stack}`);
+    return;
+  } finally { i.remove(); }
+  let {
+    push: {docs_written: nSent, start_time, end_time},
+    pull: {docs_written: nReceived}
+  } = syncReport;
+  let conflicts = await db.getConflicts();
+  
+  $world.setStatusMessage`sent ${nSent}, received ${nReceived}, ${((end_time - start_time) / 1000).toFixed(1)}secs, ${conflicts.length || "no"} conflicts`;
 }
