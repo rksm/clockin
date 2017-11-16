@@ -3,6 +3,14 @@ import { Database } from "lively.storage";
 import { date, obj, arr, string } from "lively.lang";
 import { LoadingIndicator } from "lively.components";
 
+/*
+let db = await ensureDB("roberts-timetracking/clockin");
+
+await db.getAll()
+
+*/
+
+
 // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 // time helpers
 

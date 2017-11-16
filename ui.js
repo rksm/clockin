@@ -1,4 +1,4 @@
-import { sessionsBetween, clockedInSessions, syncWithCloud, syncWithCloudIfOlderThan, ensureDate, clockout, clockin } from "./index.js";
+import { sessionsBetween, ensureDB, clockedInSessions, syncWithCloud, syncWithCloudIfOlderThan, ensureDate, clockout, clockin } from "./index.js";
 import { Database } from "lively.storage";
 import { pt, Color } from "lively.graphics";
 import { ProportionalLayout, Morph, HorizontalLayout } from "lively.morphic";
@@ -214,7 +214,7 @@ const commands = [
   {
     name: "[clockin] list since",
     exec: async (world) => {
-      let db = Database.ensureDB("roberts-timetracking/clockin"),
+      let db = await ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin',
           listEd = new ClockinList({db, remoteDBUrl, syncWithCloudIfOlderThan: "3 minutes ago"});
       listEd.openInWindow().activate();
@@ -225,7 +225,7 @@ const commands = [
   {
     name: "[clockin] current",
     async exec(world) {
-      let db = Database.ensureDB("roberts-timetracking/clockin"),
+      let db = ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
       await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
       let sessions = await clockedInSessions(db);
@@ -237,7 +237,7 @@ const commands = [
   {
     name: "[clockin] sync with cloud",
     async exec(world) {
-      let db = Database.ensureDB("roberts-timetracking/clockin"),
+      let db = await ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
       await syncWithCloud(db, remoteDBUrl);
     }
@@ -246,7 +246,7 @@ const commands = [
   {
     name: "[clockin] clockin",
     async exec(world) {
-      let db = Database.ensureDB("roberts-timetracking/clockin"),
+      let db = await ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
       await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
       let message = await $world.editPrompt("what do you want to do?", {historyId: "clockedin-start-message"});
@@ -261,7 +261,7 @@ const commands = [
   {
     name: "[clockin] clockout",
     async exec(world) {
-      let db = Database.ensureDB("roberts-timetracking/clockin"),
+      let db = await ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
       await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
       let sessions = await clockedInSessions(db);
