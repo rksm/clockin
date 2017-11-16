@@ -83,7 +83,7 @@ class Session {
         startDay = date.format(startDate, "mmm d"),
         endDay = date.format(endDate, "mmm d"),
         startTime = date.format(startDate, "HH:MM"),
-        endTime = date.format(startDate, "HH:MM");
+        endTime = date.format(endDate, "HH:MM");
 
     report = startDay === endDay ?
       `${startDay} ${startTime} - ${endTime}` :
