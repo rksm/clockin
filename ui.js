@@ -3,6 +3,7 @@ import { Database } from "lively.storage";
 import { pt, Color } from "lively.graphics";
 import { ProportionalLayout, Morph, HorizontalLayout } from "lively.morphic";
 import { connect } from "lively.bindings";
+import { arr, date } from "lively.lang/index.js";
 
 /*
 
@@ -64,8 +65,23 @@ class ClockinList extends Morph {
   get isClockinList() { return true; }
 
   printSessions() {
+    let byDay = arr.groupBy(this.sessions, ea => date.format(new Date(ea.startTime), "yyyy-mm-dd ddd"));
+    let today = date.format(new Date(), "yyyy-mm-dd ddd");
+    let report = [];
+    // day = today
+    for (let day in byDay) {
+      let sessions = byDay[day],
+          timeWorked = sessions.reduce((time, ea) => time + (ea.isDone ? ea.endTime - ea.startTime : day === today ? Date.now() - ea.startTime : 0), 0),
+          timeWorkedH = timeWorked / (1000*60*60),
+          restMins = Math.round((timeWorkedH - Math.floor(timeWorkedH)) * 60);
+      report.push(day + `\ntime worked: ${Math.floor(timeWorkedH)} hours${restMins ? ` ${restMins} mins` : ""}\n`);
+      // report.push(day + `\ntime worked: ${Math.floor(timeWorkedH)} hours ${restMins} mins\n`);
+      report.push({fontWeight: "bold"});
+      report.push(sessions.map(ea => ea.report()).join("\n") + "\n\n", null);
+    }
+
     this.world().execCommand("open workspace", {
-      content: this.sessions.map(ea => ea.report()).join("\n"),
+      content: report,
       title: `clockin sessions | ${this.startTime} - ${this.endTime}`,
       mode: "text"
     });

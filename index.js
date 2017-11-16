@@ -67,19 +67,28 @@ class Session {
     return string.truncate(this.report(), 100).replace(/\n/g, " ");
   }
 
-  report(onlyEndMessage = true) {
-    let startDate = new Date(this.sessionData.startTime),
+  report(opts = {}) {
+    let {onlyEndMessage = true} = opts,
+        startDate = new Date(this.sessionData.startTime),
         startMessage = this.sessionData.startMessage || "", report;
+
     if (!this.isDone) {
-      report = `Session in progress since ${readableDate(startDate)} (${date.relativeTo(startDate, new Date())})`;
+      report = `in progress since ${readableDate(startDate)} (${date.relativeTo(startDate, new Date())})`;
       if (startMessage) report += "\n" + startMessage;
       return report;
     }
 
     let endDate = new Date(this.sessionData.endTime),
-        endMessage = this.sessionData.endMessage || "";
+        endMessage = this.sessionData.endMessage || "",
+        startDay = date.format(startDate, "mmm d"),
+        endDay = date.format(endDate, "mmm d"),
+        startTime = date.format(startDate, "HH:MM"),
+        endTime = date.format(startDate, "HH:MM");
 
-    report = `Session ${readableDate(startDate)} - ${readableDate(endDate)} (${date.relativeTo(startDate, endDate)})`;
+    report = startDay === endDay ?
+      `${startDay} ${startTime} - ${endTime}` :
+      `${startDay} ${startTime} - ${endDay} ${endTime}`;
+    report += ` (${date.relativeTo(startDate, endDate)})`
     if (startMessage && !onlyEndMessage) report += "\n" + startMessage;
     if (endMessage) report += "\n" + endMessage;
     return report;
