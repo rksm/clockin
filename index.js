@@ -29,51 +29,47 @@ export function ensureDate(d) {
 
 class Session {
 
-  constructor(start, end) {
-    this.start = start;
-    this.end = end;
+  constructor(sessionData) {
+    if (!sessionData) throw new Error("need sessionData");
+    if (!sessionData._id) throw new Error("sessionData needs _id");
+    if (!sessionData.startTime) throw new Error("sessionData needs startTime");
+    this.sessionData = sessionData;
   }
 
-  async _updateStartOrEnd(db, what, changes) {
-    if (!this[what]) throw new Error(`${what} needed!`);
-    if (!this[what]._id) throw new Error(`${what} has no _id!`);
-    if (what === "start" && this.end && changes.time && changes.time > this.end.time)
+  get isDone() { return !!this.sessionData.endTime; }
+  get id() { return this.sessionData._id; }
+  get startTime() { return this.sessionData.startTime; }
+  get endTime() { return this.sessionData.endTime; }
+  get startMessage() { return this.sessionData.startMessage; }
+  get endMessage() { return this.sessionData.endMessage; }
+
+  async change(db, changes) {
+    let newSessionData = {...this.sessionData, ...changes};
+    if (newSessionData.endTime && newSessionData.startTime > newSessionData.endTime)
       throw new Error(`Time for start cannot be before time for end!`);
-    if (what === "end" && changes.time && changes.time < this.start.time)
-      throw new Error(`Time for end cannot be before time for start!`);
-    let changed = {...obj.dissoc(this[what], ["_rev"]), ...changes};
-    let result = await db.set(changed._id, changed);
-    this[what] = changed;
-    return result;
+    delete newSessionData._rev;
+    await db.set(newSessionData._id, newSessionData);
+    this.sessionData = newSessionData;
+    return this;
   }
 
-  async updateStart(db, changes) { return this._updateStartOrEnd(db, "start", changes); }
-  async updateEnd(db, changes) { return this._updateStartOrEnd(db, "end", changes); }
-
-  async remove(db) {
-    if (this.start && this.start._id)
-      await db.remove(this.start._id);
-    if (this.end && this.end._id)
-      await db.remove(this.end._id);
-  }
-
-  get isDone() { return !!this.end; }
+  remove(db) { return db.remove(this.id); }
 
   shortReport() {
-    return string.truncate(this.report(), 200).replace(/\n/g, " ");
+    return string.truncate(this.report(), 100).replace(/\n/g, " ");
   }
 
   report(onlyEndMessage = true) {
-    let startDate = new Date(this.start.time),
-        startMessage = this.start.message || "", report;
+    let startDate = new Date(this.sessionData.startTime),
+        startMessage = this.sessionData.startMessage || "", report;
     if (!this.isDone) {
       report = `Session in progress since ${readableDate(startDate)} (${date.relativeTo(startDate, new Date())})`;
       if (startMessage) report += "\n" + startMessage;
       return report;
     }
 
-    let endDate = new Date(this.end.time),
-        endMessage = this.end.message || "";
+    let endDate = new Date(this.sessionData.endTime),
+        endMessage = this.sessionData.endMessage || "";
 
     report = `Session ${readableDate(startDate)} - ${readableDate(endDate)} (${date.relativeTo(startDate, endDate)})`;
     if (startMessage && !onlyEndMessage) report += "\n" + startMessage;
@@ -94,24 +90,8 @@ export async function sessionsBetween(db, startDate, endDate) {
           descending: true,
           startkey: startDate.getTime(),
           endkey: endDate.getTime()
-        }),
-        docs = rows.map(ea => ea.doc),
-        last = arr.last(docs);
-
-  if (!rows.length) return [];
-
-  if (last.type === "end") {
-    last = await db.get(last.clockin);
-    docs.push(last);
-  }
-
-  docs = docs.reverse(); // from oldest to newest
-
-  let sessions = [];
-  for (let i = 0; i < docs.length; i+=2)
-    sessions.push(new Session(docs[i], docs[i+1]));
-
-  return sessions.reverse(); // newest to oldest;
+        });
+  return rows.map(ea => new Session(ea.doc));
 }
 
 export async function sessionsBetweenPrinted(db, startDate, endDate) {
@@ -126,44 +106,38 @@ export async function ensureDB(db) {
   if (db instanceof Database) return db;
   db = Database.ensureDB(db);
   await db.addDesignDocs([
-    {name: 'by_time', version: 1, mapFn: 'function (doc) { emit(doc.time); }'},
-    {name: 'start_tasks', version: 1, mapFn: 'function (doc) { doc.type = "start" && emit(doc.time); }'},
-    {name: 'end_tasks', version: 1, mapFn: 'function (doc) { doc.type = "end" && emit(doc.time); }'}
+    {name: 'by_time', version: 1, mapFn: 'function (doc) { emit(doc.startTime); }'},
+    {name: 'unfinished_tasks', version: 1, mapFn: 'function (doc) { !doc.endTime && emit(doc.startTime); }'}
   ]);
   return db;
 }
 
 async function clockedInData(db) {
   db = await ensureDB(db);
-  let {rows: [last]} = await db.query("by_time", {include_docs: true, limit: 1, descending: true});
-  return last && last.doc && last.doc.type === "start" ? last.doc : null;
+  let {rows} = await db.query('unfinished_tasks', {include_docs: true, descending: true});
+  return rows.map(ea => ea.doc);
 }
 
-export async function clockedInSession(db) {
-  let start = await clockedInData(db);
-  return start ? new Session(start) : null;
+export async function clockedInSessions(db) {
+  return (await clockedInData(db)).map(ea => new Session(ea));
 }
 
-export async function clockin(db, message, time = new Date()) {
+export async function clockin(db, startMessage, time = new Date()) {
   db = await ensureDB(db);
-  let {rows: [last]} = await db.query("by_time", {include_docs: true, limit: 1, descending: true}),
-      lastDoc = last && last.doc;
-  if (lastDoc && lastDoc.type === "start") {
-    let time = readableDate(lastDoc.time),
-        shortMessage = string.truncate(lastDoc.message, 50).replace(/\n/g, "");
-    throw new Error(`Already clocked in (${time} – ${shortMessage})`);
-  }
-  let sessStartData = {time: time.getTime(), type: "start", message};
-  await db.add(sessStartData);
-  return new Session(sessStartData);
+  let sessData = {startTime: time.getTime(), endTime: null, startMessage},
+      {id} = await db.add(sessData);
+  return new Session({...sessData, _id: id});
 }
 
-export async function clockout(db, message, time = new Date()) {
-  let start = await clockedInData(db);
-  if (!start) throw new Error(`Not clocked in`);
-  let end = {time: time.getTime(), type: "end", message, clockin: start._id};
-  await db.add(end);
-  return new Session(start, end);
+export async function clockout(db, startedId, endMessage, time = new Date()) {
+  db = await ensureDB(db);
+  let sessData = await db.get(startedId);
+  if (!sessData) throw new Error(`Not clocked in with id ${startedId}`);
+  if (sessData.endTime) throw new Error(`Session ${startedId} already marked as done (${readableDate(sessData.endTime)}, ${sessData.endMessage.split("\n")[0]})`);
+  delete sessData._rev;
+  Object.assign(sessData, {endTime: time.getTime(), endMessage});
+  await db.set(sessData._id, sessData);
+  return new Session(sessData);
 }
 
 export async function syncWithCloudIfOlderThan(db, remoteDBUrl, olderThan) {
@@ -177,6 +151,7 @@ export async function syncWithCloudIfOlderThan(db, remoteDBUrl, olderThan) {
 }
 
 export async function syncWithCloud(db, remoteDBUrl) {
+  db = await ensureDB(db);
   let i = LoadingIndicator.open("Syncing...");
   let syncReport;
   try {

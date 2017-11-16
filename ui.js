@@ -1,7 +1,7 @@
-import { sessionsBetween, syncWithCloud, syncWithCloudIfOlderThan, ensureDate, clockout, clockin, clockedInSession } from "./index.js";
+import { sessionsBetween, clockedInSessions, syncWithCloud, syncWithCloudIfOlderThan, ensureDate, clockout, clockin } from "./index.js";
 import { Database } from "lively.storage";
 import { pt, Color } from "lively.graphics";
-import { VerticalLayout, ProportionalLayout, Morph, HorizontalLayout } from "lively.morphic";
+import { ProportionalLayout, Morph, HorizontalLayout } from "lively.morphic";
 import { connect } from "lively.bindings";
 
 /*
@@ -75,38 +75,42 @@ class ClockinList extends Morph {
     let sel = this.getSubmorphNamed("session list").selection;
     if (!sel) return;
 
-    var startTime, endTime, startMessage, endMessage;
+    var startTime, endTime, startMessage, endMessage,
+        w = this.world();
 
-    startTime = await $world.prompt("start time", {requester: this, input: String(new Date(sel.start.time))});
+    startTime = await w.prompt("start time", {requester: this, input: String(new Date(sel.startTime))});
     if (!startTime) return this.setStatusMessage("canceled");
     startTime = new Date(ensureDate(startTime)).getTime();
     if (isNaN(startTime)) return this.setStatusMessage("invalid start time: " + startTime);
 
 
-    if (sel.end) {
-      endTime = await $world.prompt("end time", {requester: this, input: String(new Date(sel.end.time))});
+    if (sel.isDone) {
+      endTime = await w.prompt("end time", {requester: this, input: String(new Date(sel.endTime))});
       if (!endTime) return this.setStatusMessage("canceled");
       endTime = new Date(ensureDate(endTime)).getTime();
       if (isNaN(endTime)) return this.setStatusMessage("invalid end time: " + endTime);
     }
 
-    let message = await $world.editPrompt("message", {requester: this, input: String(sel.end ? sel.end.message : sel.start.message)});
+    let message = await w.editPrompt("message", {requester: this, input: String(sel.isDone ? sel.endMessage : sel.startMessage)});
 
-    let startChanged = startTime !== sel.start.time || (!sel.end && message !== sel.start.message);
-    let endChanged = endTime !== sel.end.time || (sel.end && message !== sel.end.message);
+    let startChanged = startTime != sel.startTime || (!sel.isDone && message !== sel.startMessage);
+    let endChanged = endTime != sel.endTime || (sel.isDone && message !== sel.endMessage);
 
     if (!startChanged && !endChanged) return this.setStatusMessage("unchanged");
 
+
+    let changes = {};
     if (startChanged) {
-      let newStart = {time: startTime};
-      if (!sel.end) newStart.message = message;
-      await sel.updateStart(this.db, newStart);
+      changes.startTime = startTime;
+      if (!sel.isDone) changes.startMessage = message;
     }
 
     if (endChanged) {
-      let newEnd = {time: endTime, message};
-      await sel.updateEnd(this.db, newEnd);
+      changes.endTime = endTime
+      changes.endMessage = message;
     }
+
+    await sel.change(this.db, changes);
 
     let sessions = this.sessions
     this.sessions = [];
@@ -224,8 +228,9 @@ const commands = [
       let db = Database.ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
       await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
-      let sess = await clockedInSession(db);
-      return $world.inform(sess ? sess.report() : "not clocked in");
+      let sessions = await clockedInSessions(db);
+      let report = sessions.length ? sessions.map(ea => ea.report()).join("\n") : "not clocked in";
+      return $world.inform(report);
     }
   },
 
@@ -244,8 +249,6 @@ const commands = [
       let db = Database.ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
       await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
-      let sess = await clockedInSession(db);
-      if (sess) return $world.inform("already clocked in");
       let message = await $world.editPrompt("what do you want to do?", {historyId: "clockedin-start-message"});
       if (!message) return $world.setStatusMessage("canceled");
       await clockin(db, message);
@@ -261,11 +264,15 @@ const commands = [
       let db = Database.ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
       await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
-      let sess = await clockedInSession(db);
-      if (!sess) return $world.inform("not clocked in");
-      let message = await $world.editPrompt("what did you do?", {input: sess.start.message, historyId: "clockedin-end-message"});
+      let sessions = await clockedInSessions(db);
+      if (!sessions.length) return $world.setStatusMessage("not clocked in");
+      let items = sessions.map(ea => ({isListItem: true, string: ea.shortReport(), value: ea})),
+          {selected: [choice]} = await $world.listPrompt("select session", items);
+      if (!choice) return $world.setStatusMessage("canceled");
+
+      let message = await $world.editPrompt("what did you do?", {input: choice.startMessage, historyId: "clockedin-end-message"});
       if (!message) return $world.setStatusMessage("canceled");
-      await clockout(db, message);
+      await clockout(db, choice.id, message);
       $world.setStatusMessage("clockedout");
       $world.getWindows().filter(ea => ea.targetMorph && ea.targetMorph.isClockinList).forEach(ea => ea.targetMorph.update());
       await syncWithCloud(db, remoteDBUrl);
