@@ -191,5 +191,5 @@ export async function syncWithCloud(db, remoteDBUrl) {
   } = syncReport;
   let conflicts = await db.getConflicts();
   
-  $world.setStatusMessage`sent ${nSent}, received ${nReceived}, ${((end_time - start_time) / 1000).toFixed(1)}secs, ${conflicts.length || "no"} conflicts`;
+  $world.setStatusMessage(`sent ${nSent}, received ${nReceived}, ${((end_time - start_time) / 1000).toFixed(1)}secs, ${conflicts.length || "no"} conflicts`);
 }

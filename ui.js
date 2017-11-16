@@ -1,4 +1,4 @@
-import { sessionsBetween, syncWithCloudIfOlderThan, ensureDate, clockout, clockin, clockedInSession } from "./index.js";
+import { sessionsBetween, syncWithCloud, syncWithCloudIfOlderThan, ensureDate, clockout, clockin, clockedInSession } from "./index.js";
 import { Database } from "lively.storage";
 import { pt, Color } from "lively.graphics";
 import { VerticalLayout, ProportionalLayout, Morph, HorizontalLayout } from "lively.morphic";
@@ -21,7 +21,8 @@ class ClockinList extends Morph {
       layout: {initialize() { this.layout = new ProportionalLayout(); }},
 
       startTime: {}, endTime: {},
-      db: {},
+      db: {}, remoteDBUrl: {},
+
       sessions: {
         after: ["submorphs"],
         set(sessions) {
@@ -113,6 +114,7 @@ class ClockinList extends Morph {
     this.getSubmorphNamed("session list").selection = sel;
 
     this.setStatusMessage("udpated");
+    if (this.remoteDBUrl) await syncWithCloud(this.db, this.remoteDBUrl);
   }
 
   async removeSessions() {
@@ -124,6 +126,7 @@ class ClockinList extends Morph {
     try {
       sessions.forEach(ea => { ea.remove(this.db); list.removeItem(ea); });
     } catch (err) { this.showError(err); }
+    if (this.remoteDBUrl) await syncWithCloud(this.db, this.remoteDBUrl);
   }
 
   onFocus() {
@@ -131,6 +134,10 @@ class ClockinList extends Morph {
   }
 
   async update(startTime = "", endTime = "") {
+    if (this.remoteDBUrl) {
+      await syncWithCloudIfOlderThan(this.db, this.remoteDBUrl, this.syncWithCloudIfOlderThan || "now");
+    }
+    
     if (startTime === "") startTime = "last week";
     if (endTime === "") endTime = "now";
 
@@ -183,6 +190,7 @@ class ClockinList extends Morph {
         name: "[clockin list] update",
         exec: async () => this.interactiveUpdate()
       }
+
     ]
   }
 
@@ -204,9 +212,8 @@ const commands = [
     exec: async (world) => {
       let db = Database.ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin',
-          listEd = new ClockinList({db});
+          listEd = new ClockinList({db, remoteDBUrl, syncWithCloudIfOlderThan: "3 minutes ago"});
       listEd.openInWindow().activate();
-      await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
       return listEd.interactiveUpdate();
     }
   },
@@ -223,6 +230,15 @@ const commands = [
   },
 
   {
+    name: "[clockin] sync with cloud",
+    async exec(world) {
+      let db = Database.ensureDB("roberts-timetracking/clockin"),
+          remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
+      await syncWithCloud(db, remoteDBUrl);
+    }
+  },
+
+  {
     name: "[clockin] clockin",
     async exec(world) {
       let db = Database.ensureDB("roberts-timetracking/clockin"),
@@ -235,6 +251,7 @@ const commands = [
       await clockin(db, message);
       $world.setStatusMessage("clockedin");
       $world.getWindows().filter(ea => ea.targetMorph && ea.targetMorph.isClockinList).forEach(ea => ea.targetMorph.update());
+      await syncWithCloud(db, remoteDBUrl);
     }
   },
 
@@ -251,6 +268,7 @@ const commands = [
       await clockout(db, message);
       $world.setStatusMessage("clockedout");
       $world.getWindows().filter(ea => ea.targetMorph && ea.targetMorph.isClockinList).forEach(ea => ea.targetMorph.update());
+      await syncWithCloud(db, remoteDBUrl);
     }
   }
 ]
@@ -260,6 +278,7 @@ let keybindings = [
   {keys: "Meta-Shift-L c l o", command: "[clockin] clockout"},
   {keys: "Meta-Shift-L c l l", command: "[clockin] list since"},
   {keys: "Meta-Shift-L c l c", command: "[clockin] current"},
+  {keys: "Meta-Shift-L c l s y n c", command: "[clockin] sync with cloud"},
 ]
 
 export function installInWorld(world) {
