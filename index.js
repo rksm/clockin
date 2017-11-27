@@ -139,9 +139,15 @@ export async function clockedInSessions(db) {
   return (await clockedInData(db)).map(ea => new Session(ea));
 }
 
-export async function clockin(db, startMessage, time = new Date()) {
+export async function clockin(db, startMessage, startTime = new Date(), endTime = null, endMessage = null) {
   db = await ensureDB(db);
-  let sessData = {startTime: time.getTime(), endTime: null, startMessage},
+  let sessData = {
+        type: "session",
+        startTime: startTime.getTime(),
+        endTime: endTime ? endTime.getTime() : null,
+        startMessage, 
+        endMessage
+      },
       {id} = await db.add(sessData);
   return new Session({...sessData, _id: id});
 }

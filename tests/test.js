@@ -17,11 +17,11 @@ describe("clockin, clockout", () => {
   it("generates sessions", async () => {
     let start = new Date();
     let sess1 = await clockin("clockin-test-db", "start to work");
-    expect(sess1.report()).matches(new RegExp(`Session in progress since ${datePrint(start)} .*\nstart to work`, "m"));
+    expect(sess1.report()).matches(new RegExp(`in progress since ${datePrint(start)} .*\nstart to work`, "m"));
     await promise.delay(300);
     let end = new Date();
     let sess2 = await clockout("clockin-test-db", sess1.id, "end of work");
-    expect(sess2.report()).matches(new RegExp(`Session ${datePrint(start)} - ${datePrint(end)} .*\nend of work`, "m"));
+    expect(sess2.report()).matches(new RegExp(`${date.format(start, "mmm d HH:MM")} - ${date.format(end, "HH:MM")} .*\nend of work`, "m"));
   });
 
   it("prints session", async () => {
@@ -32,9 +32,9 @@ describe("clockin, clockout", () => {
     let s2 = await clockin("clockin-test-db", "start to work 2");
     let printed = await sessionsBetweenPrinted("clockin-test-db", "last week", "now"),
         lines = printed.split("\n");
-    expect(lines[0]).matches(/^Session in progress since /);
+    expect(lines[0]).matches(/^in progress since /);
     expect(lines[1]).equals("start to work 2");
-    expect(lines[2]).matches(/^Session/);
+    expect(lines[2]).matches(/^[A-Z][a-z][a-z] [0-9]+ [0-9]+:[0-9]+ -/);
     expect(lines[3]).equals("end of work 1");
   });
 

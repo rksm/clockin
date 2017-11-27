@@ -1,4 +1,13 @@
-import { sessionsBetween, ensureDB, clockedInSessions, syncWithCloud, syncWithCloudIfOlderThan, ensureDate, clockout, clockin } from "./index.js";
+import {
+  sessionsBetween,
+  ensureDB,
+  clockedInSessions,
+  syncWithCloud,
+  syncWithCloudIfOlderThan,
+  ensureDate,
+  clockout,
+  clockin
+} from "./index.js";
 import { Database } from "lively.storage";
 import { pt, Color } from "lively.graphics";
 import { ProportionalLayout, Morph, HorizontalLayout } from "lively.morphic";
@@ -50,11 +59,17 @@ class ClockinList extends Morph {
             {top: 180, extent: pt(400, 20),
              layout: new HorizontalLayout({autoResize: false, spacing: 3, direction: "centered"}),
              submorphs: [
+               {type: "button", name: "clockin button", label: "clockin"},
+               {type: "button", name: "clockout button", label: "clockout"},
+               {type: "button", name: "add button", label: "Add"},
                {type: "button", name: "edit button", label: "Edit"},
                {type: "button", name: "remove button", label: "Remove"},
                {type: "button", name: "print button", label: "Print"},
              ]}];
-          connect(this.getSubmorphNamed("edit button"), 'fire', this, 'editSession');
+          connect(this.getSubmorphNamed("clockin button"), 'fire', this, 'clockin');
+          connect(this.getSubmorphNamed("clockout button"), 'fire', this, 'clockout');
+          connect(this.getSubmorphNamed("add button"), 'fire', this, 'addSession', {converter: () => undefined});
+          connect(this.getSubmorphNamed("edit button"), 'fire', this, 'editSession', {converter: () => undefined});
           connect(this.getSubmorphNamed("remove button"), 'fire', this, 'removeSessions');
           connect(this.getSubmorphNamed("print button"), 'fire', this, 'printSessions');
         }
@@ -87,30 +102,38 @@ class ClockinList extends Morph {
     });
   }
 
-  async editSession() {
-    let sel = this.getSubmorphNamed("session list").selection;
-    if (!sel) return;
+  async addSession() {
+    let session = await clockin(this.db, "", new Date(), new Date(), "...");
+    await this.editSession(session);
+    await this.update();
+    this.focus();
+    return session;
+  }
+
+  async editSession(session = this.getSubmorphNamed("session list").selection) {
+    if (!session) return;
 
     var startTime, endTime, startMessage, endMessage,
         w = this.world();
 
-    startTime = await w.prompt("start time", {requester: this, input: String(new Date(sel.startTime))});
+    startTime = await w.prompt("start time", {requester: this, input: String(new Date(session.startTime))});
     if (!startTime) return this.setStatusMessage("canceled");
     startTime = new Date(ensureDate(startTime)).getTime();
     if (isNaN(startTime)) return this.setStatusMessage("invalid start time: " + startTime);
 
 
-    if (sel.isDone) {
-      endTime = await w.prompt("end time", {requester: this, input: String(new Date(sel.endTime))});
+    if (session.isDone) {
+      endTime = await w.prompt("end time", {requester: this, input: String(new Date(session.endTime))});
       if (!endTime) return this.setStatusMessage("canceled");
       endTime = new Date(ensureDate(endTime)).getTime();
       if (isNaN(endTime)) return this.setStatusMessage("invalid end time: " + endTime);
     }
 
-    let message = await w.editPrompt("message", {requester: this, input: String(sel.isDone ? sel.endMessage : sel.startMessage)});
+    let message = await w.editPrompt("message", {requester: this, input: String(session.isDone ? session.endMessage : session.startMessage)});
+    if (message === undefined) return this.setStatusMessage("canceled");
 
-    let startChanged = startTime != sel.startTime || (!sel.isDone && message !== sel.startMessage);
-    let endChanged = endTime != sel.endTime || (sel.isDone && message !== sel.endMessage);
+    let startChanged = startTime != session.startTime || (!session.isDone && message !== session.startMessage),
+        endChanged = endTime != session.endTime || (session.isDone && message !== session.endMessage);
 
     if (!startChanged && !endChanged) return this.setStatusMessage("unchanged");
 
@@ -118,7 +141,7 @@ class ClockinList extends Morph {
     let changes = {};
     if (startChanged) {
       changes.startTime = startTime;
-      if (!sel.isDone) changes.startMessage = message;
+      if (!session.isDone) changes.startMessage = message;
     }
 
     if (endChanged) {
@@ -126,15 +149,16 @@ class ClockinList extends Morph {
       changes.endMessage = message;
     }
 
-    await sel.change(this.db, changes);
+    await session.change(this.db, changes);
 
     let sessions = this.sessions
     this.sessions = [];
     this.sessions = sessions;
-    this.getSubmorphNamed("session list").selection = sel;
+    this.getSubmorphNamed("session list").selection = session;
 
     this.setStatusMessage("udpated");
     if (this.remoteDBUrl) await syncWithCloud(this.db, this.remoteDBUrl);
+    this.focus();
   }
 
   async removeSessions() {
@@ -149,11 +173,19 @@ class ClockinList extends Morph {
     if (this.remoteDBUrl) await syncWithCloud(this.db, this.remoteDBUrl);
   }
 
+  clockin() { return $world.execCommand("[clockin] clockin"); }
+
+  clockout() {
+    let sel = this.get("session list").selection
+    if (sel.isDone) return this.setStatusMessage("Already clocked out");
+    return $world.execCommand("[clockin] clockout", {session: sel});
+  }
+
   onFocus() {
     this.get("session list").focus();
   }
 
-  async update(startTime = "", endTime = "") {
+  async update(startTime = this.startTime, endTime = this.endTime) {
     if (this.remoteDBUrl) {
       await syncWithCloudIfOlderThan(this.db, this.remoteDBUrl, this.syncWithCloudIfOlderThan || "now");
     }
@@ -241,7 +273,7 @@ const commands = [
   {
     name: "[clockin] current",
     async exec(world) {
-      let db = ensureDB("roberts-timetracking/clockin"),
+      let db = await ensureDB("roberts-timetracking/clockin"),
           remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
       await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
       let sessions = await clockedInSessions(db);
@@ -276,25 +308,45 @@ const commands = [
 
   {
     name: "[clockin] clockout",
-    async exec(world) {
-      let db = await ensureDB("roberts-timetracking/clockin"),
-          remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin';
-      await syncWithCloudIfOlderThan(db, remoteDBUrl, "3 minutes ago");
+    async exec(world, opts = {}) {
+      let {
+        dbName = "roberts-timetracking/clockin",
+        remoteDBUrl = 'http://robert.kra.hn:5984/roberts-timetracking-clockin',
+        syncWithCloud: doSync = true,
+        syncWithCloudIfOlder = "3 minutes ago",
+        session, clockoutMessage
+      } = opts;
+
+      let db = await ensureDB(dbName);
+
+      if (doSync)
+        await syncWithCloudIfOlderThan(db, remoteDBUrl, syncWithCloudIfOlder);
+
       let sessions = await clockedInSessions(db);
       if (!sessions.length) return $world.setStatusMessage("not clocked in");
-      let items = sessions.map(ea => ({isListItem: true, string: ea.shortReport(), value: ea})),
-          {selected: [choice]} = await $world.listPrompt("select session", items);
-      if (!choice) return $world.setStatusMessage("canceled");
 
-      let message = await $world.editPrompt("what did you do?", {input: choice.startMessage, historyId: "clockedin-end-message"});
+      let choice;
+      if (session) {
+        choice = sessions.find(ea => ea.id === session.id);
+        if (!choice) return $world.showError(`Cannot find session ${session.id} for clockout`)
+
+      } else {
+        let items = sessions.map(ea => ({isListItem: true, string: ea.shortReport(), value: ea})),
+            {selected} = await $world.listPrompt("select session", items);
+        choice = selected[0];
+        if (!choice) return $world.setStatusMessage("canceled");
+      }
+
+      let message = clockoutMessage || await $world.editPrompt("what did you do?", {input: choice.startMessage, historyId: "clockedin-end-message"});
       if (!message) return $world.setStatusMessage("canceled");
       await clockout(db, choice.id, message);
       $world.setStatusMessage("clockedout");
       $world.getWindows().filter(ea => ea.targetMorph && ea.targetMorph.isClockinList).forEach(ea => ea.targetMorph.update());
-      await syncWithCloud(db, remoteDBUrl);
+      if (doSync) await syncWithCloud(db, remoteDBUrl);
     }
   }
-]
+
+];
 
 let keybindings = [
   {keys: "Meta-Shift-L c l i", command: "[clockin] clockin"},
@@ -302,7 +354,7 @@ let keybindings = [
   {keys: "Meta-Shift-L c l l", command: "[clockin] list since"},
   {keys: "Meta-Shift-L c l c", command: "[clockin] current"},
   {keys: "Meta-Shift-L c l s y n c", command: "[clockin] sync with cloud"},
-]
+];
 
 export function installInWorld(world) {
   world.addCommands(commands);
